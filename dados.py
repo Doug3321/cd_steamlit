@@ -149,7 +149,7 @@ cambio_por_ano = {
 
 # Processamento dos dados
 print(f"{datetime.now().strftime('%H:%M:%S')} - Iniciando leitura do arquivo...")
-df = pd.read_csv(os.path.join("..", "archive", "merged_data.csv"))
+df = pd.read_csv(os.path.join("archive", "merged_data.csv"))
 print(f"{datetime.now().strftime('%H:%M:%S')} - Arquivo lido com {len(df)} registros")
 
 # Processar preços
