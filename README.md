@@ -12,3 +12,4 @@ Este projeto é um **dashboard interativo** desenvolvido com **Streamlit** e **P
 
 ## 🗂 Estrutura do Projeto
 
+Link: https://cdsteamlit-bdljdsbestf8mkkzhvmsxx.streamlit.app/
