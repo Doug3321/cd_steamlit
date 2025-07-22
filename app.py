@@ -2,6 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from dados import data_set
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+import matplotlib.pyplot as plt
+import numpy as np 
 
 # Configuração da página
 st.set_page_config(page_title="Análise de Jogos Steam", layout="centered")
@@ -396,5 +402,190 @@ fig_real.update_layout(
     showlegend=False,
     margin=dict(l=20, r=20, t=50, b=20),
     yaxis={'categoryorder':'total ascending'}
-)
+)               
 st.plotly_chart(fig_real, use_container_width=True)
+
+# ======================================================================
+# COMPONENTE DE MACHINE LEARNING (ÁRVORE DE DECISÃO)
+# ======================================================================
+st.header("🤖 Machine Learning - Árvore de Decisão")
+
+# Filtrar jogos com preços razoáveis
+df_filtered = data_set[
+    (data_set['preco_dolar_desconto'] <= 50) & 
+    (data_set['preco_dolar_lancamento'] <= 200)
+].copy()
+
+if len(df_filtered) < 50:
+    st.warning("⚠️ Poucos jogos após filtragem de preço. Ajustando critérios...")
+    df_filtered = data_set[
+        (data_set['preco_dolar_desconto'] <= 100) & 
+        (data_set['preco_dolar_lancamento'] <= 250)
+    ].copy()
+
+st.subheader("🔮 Prever se o Jogo terá Avaliação ≥75%")
+
+# Adicionar novas features
+df_filtered['qtd_linguagens'] = df_filtered['linguagens_suportadas'].apply(len)
+df_filtered['qtd_funcionalidades'] = df_filtered['funcionalidades'].apply(len)
+
+# Definir target (1 se avaliação >= 75%, senão 0)
+df_filtered['avaliacao_positiva'] = (df_filtered['porcentagem_final'] >= 75).astype(int)
+
+# Codificar variáveis categóricas
+from sklearn.preprocessing import LabelEncoder
+le = LabelEncoder()
+df_filtered['sistema_operacional_encoded'] = le.fit_transform(df_filtered['sistema_operacional'].astype(str))
+df_filtered['tipo_armazenamento_encoded'] = le.fit_transform(df_filtered['tipo_armazenamento'].astype(str))
+
+# Seleção de features
+features = st.multiselect(
+    "Selecione as features para previsão:",
+    options=['preco_dolar_desconto', 'ano_lancamento', 'memoria_ram', 
+            'sistema_operacional_encoded', 'tipo_armazenamento_encoded',
+            'qtd_linguagens', 'qtd_funcionalidades'],
+    default=['preco_dolar_desconto', 'ano_lancamento', 'memoria_ram', 'qtd_linguagens'],
+    key="features_decision_tree"
+)
+
+if features and len(features) >= 2:
+    X = df_filtered[features].fillna(0)
+    y = df_filtered['avaliacao_positiva']
+    
+    # Treinar modelo
+    from sklearn.tree import DecisionTreeClassifier, plot_tree
+    import matplotlib.pyplot as plt
+    
+    model = DecisionTreeClassifier(max_depth=4, random_state=42)  # Aumentei a profundidade para 4
+    model.fit(X, y)
+    
+    # Plotar árvore
+    st.write("### Estrutura da Árvore de Decisão")
+    fig, ax = plt.subplots(figsize=(20, 12))  # Aumentei o tamanho da figura
+    plot_tree(model, feature_names=features, class_names=["<75%", "≥75%"], 
+             filled=True, rounded=True, ax=ax, fontsize=10, proportion=True)
+    st.pyplot(fig)
+    
+    # Exibir importância das features
+    st.write("### Importância das Features")
+    importance = pd.DataFrame({
+        'Feature': features,
+        'Importância': model.feature_importances_
+    }).sort_values('Importância', ascending=False)
+    
+    # Gráfico de importância melhorado
+    fig_importance = px.bar(importance, x='Feature', y='Importância', 
+                           color='Importância', text_auto='.2f',
+                           title='Importância Relativa das Features',
+                           color_continuous_scale='Bluered')
+    fig_importance.update_layout(showlegend=False)
+    st.plotly_chart(fig_importance, use_container_width=True)
+    
+    # Estatísticas descritivas
+    st.write("### Estatísticas das Features Selecionadas")
+    st.dataframe(df_filtered[features].describe().T[['mean', 'std', 'min', 'max']])
+    
+    # Correlação com o target
+    st.write("### Correlação com Avaliação Positiva (≥75%)")
+    correlation = df_filtered[features + ['avaliacao_positiva']].corr()['avaliacao_positiva'].drop('avaliacao_positiva')
+    st.bar_chart(correlation)
+    
+else:
+    st.warning("Selecione pelo menos 2 features para construir a árvore de decisão.")
+    
+    
+# ======================================================================
+# COMPONENTE DE MACHINE LEARNING (K-Means Clustering) - Versão Simplificada
+# ======================================================================
+st.header("🔍 Agrupamento de Jogos com K-Means")
+
+st.markdown("""
+Agrupe jogos similares baseados em duas características. 
+Jogos no mesmo grupo têm valores parecidos para as características selecionadas.
+""")
+
+# Selecionar features para clustering
+col1, col2 = st.columns(2)
+with col1:
+    feature_x = st.selectbox(
+        "Selecione a primeira característica:",
+        options=['preco_dolar_desconto', 'ano_lancamento', 'porcentagem_final', 
+                'avaliacao_total_final', 'memoria_ram'],
+        index=0,
+        key="feature_x"
+    )
+with col2:
+    feature_y = st.selectbox(
+        "Selecione a segunda característica:",
+        options=['preco_dolar_desconto', 'ano_lancamento', 'porcentagem_final', 
+                'avaliacao_total_final', 'memoria_ram'],
+        index=2,
+        key="feature_y"
+    )
+
+if feature_x != feature_y:
+    # Preparar dados
+    df_cluster = data_set[[feature_x, feature_y, 'titulo']].dropna()
+    
+    # Selecionar número de clusters
+    n_clusters = st.slider(
+        "Número de grupos:",
+        min_value=2,
+        max_value=5,
+        value=3,
+        key="n_clusters"
+    )
+    
+    # Normalizar os dados
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(df_cluster[[feature_x, feature_y]])
+    
+    # Executar K-Means
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+    clusters = kmeans.fit_predict(X_scaled)
+    df_cluster['Grupo'] = 'Grupo ' + (clusters + 1).astype(str)
+    
+        # Visualização 2D
+    st.subheader(f"Agrupamento de Jogos ({n_clusters} grupos)")
+    fig = px.scatter(
+        df_cluster,
+        x=feature_x,
+        y=feature_y,
+        color='Grupo',
+        hover_name='titulo',
+        labels={
+            feature_x: feature_x.replace('_', ' ').title(),
+            feature_y: feature_y.replace('_', ' ').title()
+        },
+        template='plotly_dark'
+    )
+    fig.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
+    )
+    fig.update_xaxes(range=[0, 100])  # ADICIONE ESTA LINHA PARA LIMITAR O EIXO X
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Explicação dos grupos
+    st.subheader("📌 Explicação dos Grupos")
+    
+    # Calcular médias por grupo
+    group_stats = df_cluster.groupby('Grupo')[[feature_x, feature_y]].mean()
+    
+    for group in sorted(df_cluster['Grupo'].unique()):
+        group_data = df_cluster[df_cluster['Grupo'] == group]
+        sample_games = group_data.sample(min(3, len(group_data)))['titulo'].tolist()
+        
+        with st.expander(f"{group} - {len(group_data)} jogos"):
+            st.write(f"**Características médias:**")
+            st.write(f"- {feature_x.replace('_', ' ')}: {group_stats.loc[group, feature_x]:.1f}")
+            st.write(f"- {feature_y.replace('_', ' ')}: {group_stats.loc[group, feature_y]:.1f}")
+            
+            st.write("**Exemplos de jogos:**")
+            st.write(", ".join(sample_games))
+    
+    st.info("💡 Passe o mouse sobre os pontos para ver os nomes dos jogos")
+    
+else:
+    st.warning("Selecione duas características diferentes para o agrupamento.")
